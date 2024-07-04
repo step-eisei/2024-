@@ -1,2 +1,13 @@
-これはgithubテスト用のものです。
-yaaaaa
+#これはgithubテスト用のものです。
+
+#金木くん！
+
+p = [0]*15
+p[0] = 100
+
+for i in range(1,15):
+  p[i] = 100-7*i
+  print(str(p[i-1])+"引く7は？")
+  ans = input()
+  if(p[i] != ans):
+    print("爪を剥がす")
