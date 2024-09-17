@@ -1,1 +1,75 @@
+import time
+from machine import I2C, Pin
+import serial
 
+# センサーやアクチュエーターの初期化
+# I2Cの初期化（MPU6050などのセンサー用）
+i2c = I2C(scl=Pin(22), sda=Pin(21))
+
+# パラシュート制御用のGPIOピンの設定
+parachute_pin = Pin(15, Pin.OUT)
+parachute_pin.off()  # 初期状態ではオフ
+
+# シリアル通信の設定（データ送信用）
+ser = serial.Serial('/dev/ttyS0', 9600)
+
+def read_sensors():
+    # 加速度センサー（MPU6050）のデータを読み取る
+    accel_data = i2c.readfrom_mem(0x68, 0x3B, 6)
+    # データを解析してX, Y, Zの加速度値を取得
+    ax = int.from_bytes(accel_data[0:2], 'big', signed=True)
+    ay = int.from_bytes(accel_data[2:4], 'big', signed=True)
+    az = int.from_bytes(accel_data[4:6], 'big', signed=True)
+    sensor_data = {'ax': ax, 'ay': ay, 'az': az}
+    return sensor_data
+
+def condition_met(sensor_data):
+    # 例：特定の高度に達したらパラシュートを展開
+    # ここでは加速度が一定値を下回った場合とします
+    threshold = 1000  # 加速度の閾値（例）
+    if sensor_data['az'] < threshold:
+        return True
+    else:
+        return False
+
+def activate_actuator():
+    # パラシュートを展開
+    parachute_pin.on()
+    print("パラシュートを展開しました")
+
+def save_data(sensor_data):
+    # SDカードにデータを保存
+    data_string = f"{time.time()},{sensor_data['ax']},{sensor_data['ay']},{sensor_data['az']}\n"
+    with open('/sd/data.txt', 'a') as file:
+        file.write(data_string)
+    print("データを保存しました")
+
+def send_data(sensor_data):
+    # センサーデータをシリアル通信で送信
+    data_string = f"{time.time()},{sensor_data['ax']},{sensor_data['ay']},{sensor_data['az']}\n"
+    ser.write(data_string.encode('utf-8'))
+    print("データを送信しました")
+
+def main():
+    try:
+        while True:
+            # センサーのデータを取得
+            sensor_data = read_sensors()
+            
+            # 条件に応じてアクチュエーターを制御
+            if condition_met(sensor_data):
+                activate_actuator()
+            
+            # データを記録・送信
+            save_data(sensor_data)
+            send_data(sensor_data)
+            
+            # 一定時間待機
+            time.sleep(1)
+    except KeyboardInterrupt:
+        # プログラムを終了する際の処理
+        ser.close()
+        print("プログラムを終了します")
+
+if __name__ == "__main__":
+    main()
