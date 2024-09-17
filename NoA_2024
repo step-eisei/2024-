@@ -1,74 +1,117 @@
 import time
-from machine import I2C, Pin
 import serial
+import pynmea2
+import RPi.GPIO as GPIO
+import smbus
 
 # センサーやアクチュエーターの初期化
-# I2Cの初期化（MPU6050などのセンサー用）
-i2c = I2C(scl=Pin(22), sda=Pin(21))
+# I2Cバスの設定
+bus = smbus.SMBus(1)  # I2Cバス1
 
-# パラシュート制御用のGPIOピンの設定
-parachute_pin = Pin(15, Pin.OUT)
-parachute_pin.off()  # 初期状態ではオフ
+# GPIOの設定
+GPIO.setmode(GPIO.BCM)
+TRIG_PIN = 23
+ECHO_PIN = 24
+PARACHUTE_PIN = 17  # パラシュート制御用ピン
+GPIO.setup(TRIG_PIN, GPIO.OUT)
+GPIO.setup(ECHO_PIN, GPIO.IN)
+GPIO.setup(PARACHUTE_PIN, GPIO.OUT)
+GPIO.output(PARACHUTE_PIN, GPIO.LOW)  # 初期状態はオフ
 
-# シリアル通信の設定（データ送信用）
-ser = serial.Serial('/dev/ttyS0', 9600)
+# シリアルポートの設定（GNSS用）
+ser_gnss = serial.Serial('/dev/ttyS0', baudrate=9600, timeout=1)
 
-def read_sensors():
-    # 加速度センサー（MPU6050）のデータを読み取る
-    accel_data = i2c.readfrom_mem(0x68, 0x3B, 6)
-    # データを解析してX, Y, Zの加速度値を取得
-    ax = int.from_bytes(accel_data[0:2], 'big', signed=True)
-    ay = int.from_bytes(accel_data[2:4], 'big', signed=True)
-    az = int.from_bytes(accel_data[4:6], 'big', signed=True)
-    sensor_data = {'ax': ax, 'ay': ay, 'az': az}
-    return sensor_data
+# シリアルポートの設定（データ送信用、必要に応じて設定）
+ser_data = serial.Serial('/dev/ttyUSB0', baudrate=9600, timeout=1)
+
+# BMX055の初期設定
+def setup_bmx055():
+    # ...（前述のコードを挿入）
+    pass
+
+setup_bmx055()
+
+def read_gnss():
+    # ...（前述のコードを挿入）
+    pass
+
+def measure_distance():
+    # ...（前述のコードを挿入）
+    pass
+
+def read_bmx055():
+    # ...（前述のコードを挿入）
+    pass
 
 def condition_met(sensor_data):
-    # 例：特定の高度に達したらパラシュートを展開
-    # ここでは加速度が一定値を下回った場合とします
-    threshold = 1000  # 加速度の閾値（例）
-    if sensor_data['az'] < threshold:
+    # 例：高度が一定値以下になったらパラシュートを展開
+    altitude_threshold = 100  # 高度の閾値（例：100m）
+    if sensor_data['altitude'] is not None and sensor_data['altitude'] < altitude_threshold:
         return True
     else:
         return False
 
 def activate_actuator():
     # パラシュートを展開
-    parachute_pin.on()
+    GPIO.output(PARACHUTE_PIN, GPIO.HIGH)
     print("パラシュートを展開しました")
 
 def save_data(sensor_data):
-    # SDカードにデータを保存
-    data_string = f"{time.time()},{sensor_data['ax']},{sensor_data['ay']},{sensor_data['az']}\n"
-    with open('/sd/data.txt', 'a') as file:
+    # データをCSV形式で保存
+    data_string = f"{sensor_data['timestamp']},{sensor_data['latitude']},{sensor_data['longitude']},{sensor_data['altitude']},{sensor_data['distance']},{sensor_data['ax']},{sensor_data['ay']},{sensor_data['az']},{sensor_data['gx']},{sensor_data['gy']},{sensor_data['gz']},{sensor_data['mx']},{sensor_data['my']},{sensor_data['mz']}\n"
+    with open('/home/pi/data.csv', 'a') as file:
         file.write(data_string)
     print("データを保存しました")
 
 def send_data(sensor_data):
     # センサーデータをシリアル通信で送信
-    data_string = f"{time.time()},{sensor_data['ax']},{sensor_data['ay']},{sensor_data['az']}\n"
-    ser.write(data_string.encode('utf-8'))
+    data_string = f"{sensor_data['timestamp']},{sensor_data['latitude']},{sensor_data['longitude']},{sensor_data['altitude']},{sensor_data['distance']},{sensor_data['ax']},{sensor_data['ay']},{sensor_data['az']},{sensor_data['gx']},{sensor_data['gy']},{sensor_data['gz']},{sensor_data['mx']},{sensor_data['my']},{sensor_data['mz']}\n"
+    ser_data.write(data_string.encode('utf-8'))
     print("データを送信しました")
 
 def main():
     try:
         while True:
-            # センサーのデータを取得
-            sensor_data = read_sensors()
-            
+            # タイムスタンプの取得
+            timestamp = time.time()
+
+            # GNSSデータの取得
+            gnss_data = read_gnss()
+            if gnss_data is None:
+                gnss_data = {'lat': None, 'lon': None, 'alt': None}
+
+            # 超音波距離の測定
+            distance = measure_distance()
+
+            # BMX055のデータ取得
+            bmx055_data = read_bmx055()
+
+            # センサーデータの統合
+            sensor_data = {
+                'timestamp': timestamp,
+                'latitude': gnss_data['lat'],
+                'longitude': gnss_data['lon'],
+                'altitude': gnss_data['alt'],
+                'distance': distance,
+                **bmx055_data
+            }
+
             # 条件に応じてアクチュエーターを制御
             if condition_met(sensor_data):
                 activate_actuator()
-            
+
             # データを記録・送信
             save_data(sensor_data)
             send_data(sensor_data)
-            
+
             # 一定時間待機
             time.sleep(1)
+
     except KeyboardInterrupt:
         # プログラムを終了する際の処理
-        ser.close()
+        ser_gnss.close()
+        ser_data.close()
+        GPIO.cleanup()
         print("プログラムを終了します")
 
 if __name__ == "__main__":
